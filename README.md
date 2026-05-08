@@ -1,53 +1,233 @@
 # 🧠 MindMap Desktop Application
 
-一款基于 Java (Swing/JavaFX) 开发的轻量级思维导图桌面应用程序。本项目采用了经典的 MVC 架构，并实现了递归自动布局算法，旨在提供流畅、高效的思维导图绘制体验。
+一款基于 Java **Swing** 开发的轻量级思维导图桌面应用程序。项目采用 **MVC + 策略模式 + 观察者模式** 架构，布局算法可插拔，代码规模约 **1500 行**，适合作为 Java 桌面应用与经典设计模式的学习样本。
 
-## 1. 架构概览 (Architecture Overview)
+> 本仓库经过一轮架构翻新（P0/P1）：拆分了 Controller 层、细化了变更事件类型、将布局算法抽象为可注册的策略引擎。下文所述结构均以**当前代码**为准。
 
-本项目采用了经典的 **MVC（Model-View-Controller）** 架构，实现了状态与渲染的彻底分离：
+---
 
-*   **Model (数据层)**：`MindNode` 和 `MindMapModel`。只负责维护树形数据结构、节点属性（文本、层级）以及父子关系的引用，与 UI 完全解耦。
-*   **View (视图层)**：`DrawingPanel`, `StructureTreeView`, `ToolbarView` 等。专注于利用 `Graphics2D` 将节点绘制到屏幕上，或在侧边栏以树形列表展示。
-*   **Controller (控制与逻辑层)**：`MainFrame` 充当事件协调者，`LayoutManager` 和具体的 `Engine`（如 `AutoLayoutEngine`）充当业务逻辑控制器。
+## 1. 快速开始
 
-### 核心数据流转（以“添加子节点”为例）
-1.  **事件捕获**：用户在视图区点击“添加子节点”，触发事件监听器。
-2.  **模型更新**：Controller 调用 `MindMapModel.addChildNode()` 修改底层数据结构。
-3.  **重新布局**：Model 更新触发观察者模式通知，`LayoutManager` 调用相应的布局引擎（如 `AutoLayoutEngine`）重新计算各个节点的 $(x, y)$ 坐标。
-4.  **视图重绘**：布局完毕后，触发 `DrawingPanel.repaint()`。
-5.  **底层渲染**：Swing EDT (Event Dispatch Thread) 调用 `paintComponent(Graphics g)`，读取节点的新坐标并渲染屏幕。
+### 环境要求
+- **JDK 23**（见 [`pom.xml`](./pom.xml)）
+- **Maven 3.6+**
+- 无第三方依赖，纯 JDK Swing
 
-## 2. 核心算法探秘 (The Core Algorithm)
+### 构建与运行
+```bash
+mvn compile
+mvn exec:java -Dexec.mainClass="mindmap.app.MindMapApp"
+```
+或在 IDE 中直接运行 `mindmap.app.MindMapApp#main`。
 
-### 递归布局逻辑 (Recursive Layout)
-思维导图的自动排版采用 **后序遍历 (Bottom-Up) + 前序遍历 (Top-Down)** 结合的算法：
+---
 
-1.  **计算子树高度 (Bottom-Up)**：递归计算，一个节点的占用高度等于其所有子节点占用高度的总和（加上间距）。
-2.  **分配坐标 (Top-Down)**：根节点位置固定，根据子树的高度，按比例将 Y 轴空间划分给各个子节点，确保节点父子居中对齐。
+## 2. 架构概览
 
-### 坐标系与防重叠原理
-布局采用**包围盒（Bounding Box）**原理，将每个节点及其所有子代看作一个矩形块进行纵向堆叠排布，通过累加 `SubtreeHeight + Padding` 的方式分配 Y 坐标，从根本上杜绝节点物理碰撞。
+经典 **MVC** 分层，各层通过接口 + 事件单向通信：
 
-## 3. 组件级剖析 (Component Breakdown)
+```
+┌───────────────────────────────────────────────────────────────┐
+│                           View (ui/)                          │
+│    MainFrame │ ToolbarView │ StructureTreeView │ DrawingPanel │
+│                                │                              │
+│                         (用户操作)                             │
+│                                ▼                              │
+│                     Controller (controller/)                  │
+│                      MindMapController                        │
+│                                │                              │
+│                         (修改数据)                             │
+│                                ▼                              │
+│                        Model (model/)                         │
+│                   MindMapModel / MindNode                     │
+│                                │                              │
+│        (广播 ChangeType: STRUCTURE/SELECTION/LAYOUT/FILE)     │
+│                                ▼                              │
+│        所有 View 根据事件类型各自决定重算布局或仅重绘            │
+└───────────────────────────────────────────────────────────────┘
 
-### Graphics2D 渲染引擎
-*   **双缓冲抗闪烁**：继承 `JPanel` 并重写 `paintComponent` 实现双缓冲绘制。
-*   **抗锯齿渲染**：引入 `RenderingHints.KEY_ANTIALIASING`，确保连接曲线与圆角矩形的边缘平滑顺畅。
+                DrawingPanel 在绘制时调用：
+                   ▼
+             Engine (engine/)
+      LayoutEngineFactory ─► LayoutEngine 实现类
+                             ├─ AutoLayoutEngine
+                             └─ DirectionalLayoutEngine
+```
 
-### 序列化与文件 I/O (Serialization)
-*   通过 `ObjectOutputStream` 实现 `util.FileHandler` 的持久化操作。
-*   **性能优化**：对所有的 UI 临时状态（如 `isSelected`, `isHovered`）以及计算得出的绝对坐标 $(x, y)$ 使用 `transient` 关键字修饰，极大减小了存档文件体积，避免跨设备分辨率导致的坐标错乱。
+### 分层原则
+| 层 | 可依赖 | 禁止依赖 |
+|---|---|---|
+| `model`   | 无（纯 POJO + 事件）       | Swing、AWT、Controller、View |
+| `engine`  | `model`、`java.awt.FontMetrics` | Swing 组件、View、Controller |
+| `controller` | `model`                   | View |
+| `ui`      | `model`、`controller`、`engine` | —— |
+| `util`    | `model`                    | View、Controller |
 
-## 4. 技术亮点与设计模式
+> 💡 这一套依赖方向保证了 **Model 和 Engine 可单独单元测试**，无需拉起 Swing。
 
-1.  **组合模式 (Composite)**：`MindNode` 即是节点也是容器，优雅处理树形数据结构。
-2.  **策略模式 (Strategy)**：布局算法被抽象为 `LayoutEngine` 接口，支持在 `DirectionalLayoutEngine` 和 `AutoLayoutEngine` 之间无缝热切换。
-3.  **观察者模式 (Observer)**：Model 的改变自动通知 UI 进行重绘，深度解耦数据和视图。
-4.  **异步渲染优化**：处理超大节点树时，可将复杂的递归计算置于后台线程（如 `SwingWorker`），仅在计算完成后触发主线程的 `repaint()`，防止 UI 假死。
+---
 
-## 5. 未来演进路线 (Future Roadmap)
+## 3. 模块与代码清单
 
-*   [ ] **撤销/重做 (Undo/Redo)**：引入命令模式 (Command Pattern)，封装操作栈以实现无损撤销。
-*   [ ] **节点样式主题系统**：引入享元模式 (Flyweight) 全局管理 `Color` 和 `Font` 资源，实现一键切换主题外观。
-*   [ ] **实时搜索定位**：利用深度优先搜索（DFS）遍历节点文本，匹配后动态高亮并自动滚动视图定位。
-*   [ ] **连线类型扩展**：增加概要线 (Summary Link)，允许在非父子关系的节点之间创建视觉连接。
+```
+src/main/java/mindmap/
+├── app/
+│   └── MindMapApp.java            # 入口：EDT + LookAndFeel + 装配
+├── model/                          # 数据层（无 Swing 依赖）
+│   ├── MindNode.java              # 树节点（id, text, children, parent）
+│   ├── MindMapModel.java          # 模型 + 事件源
+│   ├── ChangeListener.java        # 变更监听接口
+│   └── ChangeType.java            # 变更事件类型枚举
+├── controller/
+│   └── MindMapController.java     # 用户操作 → 模型变更的唯一入口
+├── engine/                         # 布局算法（纯计算，无 Swing 组件依赖）
+│   ├── LayoutEngine.java          # 策略接口（P1 新引入，推荐使用）
+│   ├── LayoutManager.java         # @Deprecated 兼容桥接，勿再使用
+│   ├── AutoLayoutEngine.java      # 通用自动布局（后序 + 前序递归）
+│   ├── DirectionalLayoutEngine.java # 左/右流向布局
+│   ├── LayoutEngineFactory.java   # 按名称注册/获取布局引擎
+│   ├── LayoutResult.java          # 一次布局的全部坐标/尺寸结果
+│   └── NodeLayout.java            # 单节点的坐标与尺寸
+├── ui/
+│   ├── MainFrame.java             # 主窗口装配（工具栏 + 树 + 画布）
+│   ├── ToolbarView.java           # 顶部操作栏
+│   ├── StructureTreeView.java     # 左侧结构树（JTree）
+│   ├── DrawingPanel.java          # 画布：缩放/平移/拖动/选中
+│   └── MindMapRenderer.java       # 纯绘制（Graphics2D，无状态）
+└── util/
+    └── FileHandler.java           # 文件保存 / 读取
+```
+
+**合计约 19 个文件、1500 行左右**，推荐一天内读完。
+
+---
+
+## 4. 核心设计点
+
+### 4.1 事件类型细化（P0）
+
+`ChangeType` 将"模型变更"拆分为四类，View 可以按需响应：
+
+| 事件类型 | 含义 | 典型响应 |
+|---|---|---|
+| `STRUCTURE_CHANGED` | 节点增删、改名、换根 | 重算布局 + 刷新树 + 重绘 |
+| `SELECTION_CHANGED` | 仅选中节点变化 | 仅重绘（不需重算布局） |
+| `LAYOUT_CHANGED`    | 布局策略切换 | 重算布局 + 重绘 |
+| `FILE_CHANGED`      | 当前文件名变化 | 仅刷新状态栏 |
+
+> 旧版本只有单一"已变更"信号，无差别全量刷新。细化后避免了选中节点时还去跑整棵树的递归布局，也避免了换文件名时触发多余重绘。
+
+### 4.2 布局算法插件化（P1）
+
+```java
+public interface LayoutEngine {
+    LayoutResult calculateLayout(MindNode root, FontMetrics fm, String layoutType);
+}
+```
+
+- `AutoLayoutEngine`：默认实现，采用 **后序 + 前序递归** 算法
+  1. **后序**：自底向上累计每棵子树的高度（包围盒思想）
+  2. **前序**：自顶向下按子树高度比例分配 Y 坐标，保证父子居中对齐
+- `DirectionalLayoutEngine`：继承上面的算法，额外约束方向（`Right-Flow` / `Left-Flow`）
+- `LayoutEngineFactory`：**注册表模式**，通过布局名字符串查表取引擎；**新增布局只需新增一个引擎类并在工厂注册一行，View 完全无感知**
+
+> 旧的 `LayoutManager` 与 `java.awt.LayoutManager` 命名冲突，已改名为 `LayoutEngine`；原接口保留为空的 `@Deprecated` 子接口，作平滑过渡。
+
+### 4.3 用户操作统一走 Controller（P0）
+
+View 层（Toolbar / 树 / 画布）**禁止直接改模型**，所有写操作必须经过 `MindMapController`：
+
+```
+ToolbarView ─┐
+TreeView    ─┼─► MindMapController ─► MindMapModel ─► ChangeEvent ─► 所有 View
+DrawingPanel ┘
+```
+
+好处：
+1. 业务逻辑（如"添加子节点后自动选中新节点"）集中一处维护
+2. 未来加入 **撤销/重做（命令模式）** 时，只需在 Controller 层包装命令对象
+
+### 4.4 绘制与交互职责分离
+
+| 类 | 职责 | 是否有状态 |
+|---|---|---|
+| `DrawingPanel`    | 持有 `transform`（缩放/平移）、处理鼠标事件、调用 Renderer | 有 |
+| `MindMapRenderer` | 输入 `LayoutResult` + `Graphics2D`，输出像素 | **无**（纯函数） |
+
+> Renderer 无状态 → 可随时替换为导出 SVG / PNG 的 Renderer，复用布局结果。
+
+---
+
+## 5. 典型数据流：以"添加子节点"为例
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant T as ToolbarView
+    participant C as MindMapController
+    participant M as MindMapModel
+    participant D as DrawingPanel
+    participant Tree as StructureTreeView
+
+    U->>T: 点击"添加子节点"
+    T->>C: addChildToSelected(text)
+    C->>M: selected.addChild(newNode)
+    C->>M: fire(ChangeType.STRUCTURE_CHANGED)
+    M-->>D: onChange(STRUCTURE_CHANGED)
+    M-->>Tree: onChange(STRUCTURE_CHANGED)
+    D->>D: LayoutEngine.calculateLayout()
+    D->>D: repaint() → Renderer 绘制
+    Tree->>Tree: 重建 JTree 节点
+```
+
+---
+
+## 6. 设计模式清单
+
+| 模式 | 体现位置 |
+|---|---|
+| **组合 (Composite)** | `MindNode` 既是节点也是容器 |
+| **策略 (Strategy)**  | `LayoutEngine` + 多种实现 |
+| **简单工厂 / 注册表** | `LayoutEngineFactory` |
+| **观察者 (Observer)** | `MindMapModel` ←→ `ChangeListener` |
+| **MVC**               | model / controller / ui 三层分离 |
+
+---
+
+## 7. 从 0 开始的学习路径
+
+建议按"数据→算法→控制→界面"自底向上阅读（约 2～3 小时通读）：
+
+1. **Model 层**（30 min）
+   `MindNode` → `ChangeType` → `ChangeListener` → `MindMapModel`
+2. **Engine 层**（45 min）
+   `NodeLayout` → `LayoutResult` → `LayoutEngine` → `AutoLayoutEngine` → `DirectionalLayoutEngine` → `LayoutEngineFactory`
+3. **Controller 层**（20 min）
+   `MindMapController`
+4. **UI 层**（1 h）
+   `MainFrame` → `ToolbarView` → `StructureTreeView` → `MindMapRenderer` → `DrawingPanel`
+5. **Util**（10 min，可选）
+   `FileHandler`
+
+### 通关自检清单
+- [ ] 添加节点时，`STRUCTURE_CHANGED` 会通知哪些 View？
+- [ ] `STRUCTURE_CHANGED` 与 `LAYOUT_CHANGED` 分别触发什么响应？
+- [ ] `SELECTION_CHANGED` 为什么不需要重算布局？
+- [ ] 想新增一种"圆形布局"，需要动几个文件？（答：新建一个 Engine + Factory 注册 1 行）
+- [ ] 为什么 `MindMapRenderer` 不持有 `MindNode` 引用？
+
+---
+
+## 8. 未来演进 Roadmap
+
+- [ ] **撤销/重做**：在 Controller 层引入命令模式 + 操作栈
+- [ ] **主题系统**：享元模式统一管理 `Color` / `Font`，一键切换深色模式
+- [ ] **实时搜索**：DFS 遍历 + 高亮滚动定位
+- [ ] **文件格式**：从 `ObjectOutputStream` 迁移到 JSON，便于跨版本兼容
+- [ ] **异步布局**：超大树启用 `SwingWorker`，后台计算 `LayoutResult`，主线程仅 `repaint()`
+
+---
+
+## 9. License
+
+本项目仅用于学习与交流。
