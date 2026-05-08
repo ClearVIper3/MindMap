@@ -1,49 +1,88 @@
 package mindmap.ui;
 
+import mindmap.engine.LayoutEngine;
+import mindmap.engine.LayoutEngineFactory;
+import mindmap.engine.LayoutResult;
+import mindmap.engine.NodeLayout;
+import mindmap.model.ChangeType;
 import mindmap.model.MindMapModel;
 import mindmap.model.MindNode;
-import mindmap.engine.LayoutManager;
-import mindmap.engine.AutoLayoutEngine;
-import mindmap.engine.DirectionalLayoutEngine;
 
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
+import javax.swing.JPanel;
+import java.awt.Color;
+import java.awt.Cursor;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Point;
+import java.awt.RenderingHints;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseMotionAdapter;
 import java.awt.geom.AffineTransform;
-import java.awt.geom.Path2D;
 
 public class DrawingPanel extends JPanel {
-    private MindMapModel model;
-    
+    private final MindMapModel model;
+
     private double scale = 1.0;
     private double translateX = 0, translateY = 0;
     private Point lastMousePt;
+
     private boolean layoutDirty = true;
-    
-    private static final Color MAIN_BLUE = new Color(74, 144, 226);
+    private LayoutResult layoutResult;
+
     private static final Color BG_COLOR = new Color(245, 247, 250);
-    private static final Color SEL_BG_COLOR = new Color(225, 238, 252);
-    private static final Color SEL_BORDER_COLOR = new Color(208, 2, 27);
-    private static final Color TEXT_COLOR = new Color(50, 50, 50);
 
     public DrawingPanel(MindMapModel model) {
         this.model = model;
         setBackground(BG_COLOR);
         setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        
-        model.addChangeListener(() -> {
-            layoutDirty = true;
-            repaint();
+
+        // 只有结构或布局策略变化时才需要重算布局；选中变化只重绘。
+        model.addChangeListener(type -> {
+            if (type == ChangeType.STRUCTURE_CHANGED || type == ChangeType.LAYOUT_CHANGED) {
+                layoutDirty = true;
+            }
+            if (type != ChangeType.FILE_CHANGED) {
+                repaint();
+            }
         });
 
         initInteractions();
     }
-    
+
     public Color getBgColor() { return BG_COLOR; }
-    
+
+    /** 提供给外部（如 exportImage）的布局结果访问。若尚未计算，返回 null。 */
+    public LayoutResult getLayoutResult() { return layoutResult; }
+
+    /** 供导出图片时使用：在给定 FontMetrics 下同步计算一次布局并返回结果。 */
+    public LayoutResult computeLayout(FontMetrics fm) {
+        LayoutEngine engine = LayoutEngineFactory.create(model.getCurrentLayout());
+        layoutResult = engine.calculateLayout(model.getRoot(), fm, model.getCurrentLayout());
+        layoutDirty = false;
+        return layoutResult;
+    }
+
+    /**
+     * 重置视图变换：把原点移动到面板中心。
+     * 若当前面板尚未显示（宽高为 0），则延迟到下一次组件尺寸变化时再归位，
+     * 避免把画布挪到左上角不可见的位置。
+     */
     public void resetTransform() {
-        translateX = getWidth() / 2.0;
-        translateY = getHeight() / 2.0;
+        int w = getWidth();
+        int h = getHeight();
+        if (w <= 0 || h <= 0) {
+            // 等组件被布局后再归位
+            translateX = 0;
+            translateY = 0;
+        } else {
+            translateX = w / 2.0;
+            translateY = h / 2.0;
+        }
         scale = 1.0;
         repaint();
     }
@@ -54,7 +93,8 @@ public class DrawingPanel extends JPanel {
                 lastMousePt = e.getPoint();
                 int worldX = (int) ((e.getX() - translateX) / scale);
                 int worldY = (int) ((e.getY() - translateY) / scale);
-                
+
+                if (layoutResult == null) return;
                 MindNode clicked = findNodeAt(model.getRoot(), worldX, worldY);
                 if (clicked != null) {
                     model.setSelectedNode(clicked);
@@ -83,7 +123,7 @@ public class DrawingPanel extends JPanel {
             translateY = e.getY() - scaleChange * (e.getY() - translateY);
             repaint();
         });
-        
+
         addComponentListener(new ComponentAdapter() {
             public void componentResized(ComponentEvent e) {
                 if (translateX == 0 && translateY == 0 && getWidth() > 0) {
@@ -97,76 +137,40 @@ public class DrawingPanel extends JPanel {
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
-        Graphics2D g2 = (Graphics2D) g;
-        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-        if (layoutDirty && model.getRoot() != null) {
-            LayoutManager layoutEngine = "Balanced".equals(model.getCurrentLayout()) ? 
-                new AutoLayoutEngine() : new DirectionalLayoutEngine();
-            
-            FontMetrics fm = g2.getFontMetrics(g2.getFont().deriveFont(Font.BOLD, 14f));
-            layoutEngine.calculateLayout(model.getRoot(), fm, model.getCurrentLayout());
-            layoutDirty = false;
+            if ((layoutDirty || layoutResult == null) && model.getRoot() != null) {
+                FontMetrics fm = g2.getFontMetrics(g2.getFont().deriveFont(Font.BOLD, 14f));
+                LayoutEngine engine = LayoutEngineFactory.create(model.getCurrentLayout());
+                layoutResult = engine.calculateLayout(model.getRoot(), fm, model.getCurrentLayout());
+                layoutDirty = false;
+            }
+
+            AffineTransform original = g2.getTransform();
+            AffineTransform at = new AffineTransform(original);
+            at.translate(translateX, translateY);
+            at.scale(scale, scale);
+            g2.setTransform(at);
+
+            if (model.getRoot() != null && layoutResult != null) {
+                MindMapRenderer.drawConnections(g2, model.getRoot(), layoutResult);
+                MindMapRenderer.drawNodes(g2, model.getRoot(), layoutResult, model.getSelectedNode());
+            }
+
+            g2.setTransform(original);
+        } finally {
+            g2.dispose();
         }
-
-        AffineTransform at = new AffineTransform();
-        at.translate(translateX, translateY);
-        at.scale(scale, scale);
-        g2.setTransform(at);
-
-        if (model.getRoot() != null) {
-            drawConnections(g2, model.getRoot());
-            drawNodes(g2, model.getRoot());
-        }
-    }
-
-    public void drawConnections(Graphics2D g2, MindNode node) {
-        g2.setStroke(new BasicStroke(1.8f));
-        g2.setColor(MAIN_BLUE);
-        int H_GAP = 80;
-        
-        for (MindNode child : node.getChildren()) {
-            boolean childIsRight = child.getX() > node.getX();
-            int startX = childIsRight ? node.getX() + node.getWidth() : node.getX();
-            int startY = node.getY() + node.getHeight() / 2;
-            int endX = childIsRight ? child.getX() : child.getX() + child.getWidth();
-            int endY = child.getY() + child.getHeight() / 2;
-
-            int ctrlX1 = startX + (childIsRight ? H_GAP/2 : -H_GAP/2);
-            int ctrlX2 = endX - (childIsRight ? H_GAP/2 : -H_GAP/2);
-
-            Path2D path = new Path2D.Double();
-            path.moveTo(startX, startY);
-            path.curveTo(ctrlX1, startY, ctrlX2, endY, endX, endY);
-            g2.draw(path);
-            
-            drawConnections(g2, child);
-        }
-    }
-
-    public void drawNodes(Graphics2D g2, MindNode node) {
-        for (MindNode child : node.getChildren()) drawNodes(g2, child);
-
-        boolean isSel = (node == model.getSelectedNode());
-        g2.setColor(isSel ? SEL_BG_COLOR : Color.WHITE);
-        g2.fillRoundRect(node.getX(), node.getY(), node.getWidth(), node.getHeight(), 14, 14);
-        
-        g2.setStroke(new BasicStroke(isSel ? 2.5f : 1.5f));
-        g2.setColor(isSel ? SEL_BORDER_COLOR : MAIN_BLUE);
-        g2.drawRoundRect(node.getX(), node.getY(), node.getWidth(), node.getHeight(), 14, 14);
-        
-        g2.setColor(TEXT_COLOR);
-        g2.setFont(g2.getFont().deriveFont(isSel ? Font.BOLD : Font.PLAIN, 14f));
-        FontMetrics fm = g2.getFontMetrics();
-        int tx = node.getX() + 18;
-        int ty = node.getY() + 12 + fm.getAscent();
-        g2.drawString(node.getText(), tx, ty);
     }
 
     private MindNode findNodeAt(MindNode node, int mx, int my) {
-        if (mx >= node.getX() && mx <= node.getX() + node.getWidth() && 
-            my >= node.getY() && my <= node.getY() + node.getHeight()) {
+        NodeLayout l = layoutResult.get(node);
+        if (l != null
+                && mx >= l.getX() && mx <= l.getX() + l.getWidth()
+                && my >= l.getY() && my <= l.getY() + l.getHeight()) {
             return node;
         }
         for (MindNode child : node.getChildren()) {

@@ -1,8 +1,9 @@
 package mindmap.engine;
 
-import mindmap.model.MindNode;
-import java.awt.FontMetrics;
-
-public interface LayoutManager {
-    void calculateLayout(MindNode root, FontMetrics fm, String layoutType);
+/**
+ * @deprecated 已重命名为 {@link LayoutEngine}，以避免与 {@link java.awt.LayoutManager} 同名。
+ * 保留此接口仅为向后兼容，新代码请使用 {@link LayoutEngine}。
+ */
+@Deprecated
+public interface LayoutManager extends LayoutEngine {
 }
