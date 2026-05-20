@@ -1,131 +1,341 @@
 package mindmap.ui;
 
-import mindmap.controller.MindMapController;
-import mindmap.model.ChangeType;
-import mindmap.model.MindMapModel;
+import mindmap.model.Layout;
+import mindmap.model.MindNode;
+import mindmap.util.FileHandler;
 
-import javax.swing.JFileChooser;
-import javax.swing.JFrame;
-import javax.swing.JLabel;
-import javax.swing.JOptionPane;
-import javax.swing.JSplitPane;
-import javax.swing.SwingUtilities;
+import javax.swing.*;
 import javax.swing.border.EmptyBorder;
-import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Dimension;
+import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.tree.DefaultTreeCellRenderer;
+import javax.swing.tree.DefaultTreeModel;
+import javax.swing.tree.TreePath;
+import java.awt.*;
+import java.awt.event.*;
+import java.awt.geom.AffineTransform;
+import java.awt.geom.Path2D;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Map;
 
-/**
- * 主窗口：只负责 UI 布局与"交互式 I/O"（文件对话框、消息框）。
- * 所有修改 Model 的业务逻辑都交给 {@link MindMapController}。
- */
-public class MainFrame extends JFrame implements MindMapController.FileExportTarget {
-    private final MindMapModel model;
-    private final MindMapController controller;
-    private DrawingPanel drawingPanel;
-    private StructureTreeView treeView;
-    private ToolbarView toolbarView;
-    private JLabel statusLabel;
+public class MainFrame extends JFrame {
+    static final Color BG = new Color(245, 247, 250), BLUE = new Color(74, 144, 226),
+            SEL_BG = new Color(225, 238, 252), SEL_BD = new Color(208, 2, 27), TEXT = new Color(50, 50, 50);
 
-    public MainFrame(MindMapModel model) {
-        this.model = model;
-        this.controller = new MindMapController(model);
+    private MindNode root, selected;
+    private String layoutType = Layout.DEFAULT, fileName = "Untitled.dt";
+    private final List<Runnable> listeners = new ArrayList<>();
+    private final DrawPanel canvas = new DrawPanel();
+    private final TreePanel treePanel = new TreePanel();
+    private final JLabel status = new JLabel();
 
+    public MainFrame() {
         setTitle("Java Core Technology - Mind Mapping Tool");
         setSize(1200, 800);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
+        newMap();
 
-        initUI();
+        treePanel.setPreferredSize(new Dimension(250, 0));
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, canvas, treePanel);
+        split.setResizeWeight(1.0); split.setDividerSize(4); split.setBorder(null);
+        status.setBorder(new EmptyBorder(5, 10, 5, 10));
+        status.setForeground(Color.GRAY);
 
-        // 状态栏只关心文件名 / 布局变化
-        model.addChangeListener(type -> {
-            if (type == ChangeType.FILE_CHANGED || type == ChangeType.LAYOUT_CHANGED) {
-                updateStatus();
+        add(buildToolbar(), BorderLayout.NORTH);
+        add(split, BorderLayout.CENTER);
+        add(status, BorderLayout.SOUTH);
+
+        listeners.add(() -> SwingUtilities.invokeLater(() -> status.setText(
+                " File: " + fileName + " | Layout: " + layoutType + " | Zoom, Pan, Explore")));
+        fire();
+    }
+
+    private void fire() { for (Runnable r : listeners) r.run(); }
+
+    private void newMap() {
+        root = new MindNode("Java Core Technology");
+        for (String s : new String[]{"Collections", "Concurrency", "JVM Architecture", "I/O & NIO"})
+            root.addChild(new MindNode(s));
+        selected = root;
+        fileName = "Untitled.dt";
+        canvas.layoutDirty = true;
+        fire();
+    }
+
+    private String prompt(String msg, String title, String init) {
+        return (String) JOptionPane.showInputDialog(this, msg, title, JOptionPane.PLAIN_MESSAGE, null, null, init);
+    }
+
+    private void editText(String title, java.util.function.Consumer<String> action) {
+        if (selected == null) return;
+        String t = prompt("Node Text:", title, "New Node");
+        if (t != null && !t.trim().isEmpty()) { action.accept(t.trim()); canvas.layoutDirty = true; fire(); }
+    }
+
+    private JToolBar buildToolbar() {
+        JToolBar bar = new JToolBar();
+        bar.setBackground(Color.WHITE); bar.setFloatable(false);
+        bar.setBorder(new EmptyBorder(10, 10, 10, 10));
+
+        addBtn(bar, "New", e -> newMap());
+        addBtn(bar, "Open", e -> doOpen());
+        addBtn(bar, "Save (.dt)", e -> doSave());
+        bar.add(Box.createHorizontalStrut(10));
+        addBtn(bar, "Export Image", e -> doExport());
+        bar.add(Box.createHorizontalStrut(10));
+        addBtn(bar, "+ Child", e -> editText("Add Child", t -> selected.addChild(new MindNode(t))));
+        addBtn(bar, "+ Sibling", e -> {
+            if (selected != null && selected.getParent() != null)
+                editText("Add Sibling", t -> selected.addSiblingAfter(new MindNode(t)));
+        });
+        addBtn(bar, "Rename", e -> {
+            if (selected == null) return;
+            String t = prompt("Rename Node:", "Rename", selected.getText());
+            if (t != null && !t.trim().isEmpty()) { selected.setText(t.trim()); canvas.layoutDirty = true; fire(); }
+        });
+        addBtn(bar, "Delete", e -> {
+            if (selected != null && selected != root) {
+                selected.remove(); selected = root; canvas.layoutDirty = true; fire();
             }
         });
-        updateStatus();
-        // 初始触发一次结构事件，让各 View 完成首次渲染
-        model.fire(ChangeType.STRUCTURE_CHANGED);
+        bar.add(Box.createHorizontalStrut(10));
+        bar.add(new JLabel(" Layout: "));
+
+        JComboBox<String> combo = new JComboBox<>(Layout.TYPES);
+        combo.setMaximumSize(new Dimension(120, 30));
+        combo.setSelectedItem(layoutType);
+        combo.addActionListener(e -> {
+            String s = (String) combo.getSelectedItem();
+            if (s != null && !s.equals(layoutType)) { layoutType = s; canvas.layoutDirty = true; fire(); }
+        });
+        bar.add(combo);
+        return bar;
     }
 
-    private void initUI() {
-        drawingPanel = new DrawingPanel(model);
-        treeView = new StructureTreeView(model);
-        toolbarView = new ToolbarView(controller, this::saveFile, this::openFile, this::exportImage);
-
-        treeView.setPreferredSize(new Dimension(250, 0));
-
-        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, drawingPanel, treeView);
-        splitPane.setResizeWeight(1.0);
-        splitPane.setDividerSize(4);
-        splitPane.setBorder(null);
-
-        statusLabel = new JLabel(" Ready | Drag canvas to Pan, Scroll to Zoom");
-        statusLabel.setBorder(new EmptyBorder(5, 10, 5, 10));
-        statusLabel.setForeground(Color.GRAY);
-
-        add(toolbarView, BorderLayout.NORTH);
-        add(splitPane, BorderLayout.CENTER);
-        add(statusLabel, BorderLayout.SOUTH);
+    private void addBtn(JToolBar bar, String text, ActionListener al) {
+        JButton b = new JButton(text);
+        b.setFocusPainted(false);
+        b.setBackground(Color.WHITE);
+        b.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(220, 220, 220)),
+                new EmptyBorder(6, 12, 6, 12)));
+        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        b.addActionListener(al);
+        bar.add(b);
+        bar.add(Box.createHorizontalStrut(5));
     }
 
-    private void updateStatus() {
-        SwingUtilities.invokeLater(() -> statusLabel.setText(
-                " File: " + model.getCurrentFileName()
-                        + " | Layout: " + model.getCurrentLayout()
-                        + " | Zoom, Pan, Explore"));
-    }
-
-    // ---------- UI 交互式 I/O ----------
-
-    private void saveFile() {
+    private void doSave() {
         JFileChooser fc = new JFileChooser();
-        fc.setSelectedFile(new File(model.getCurrentFileName()));
+        fc.setSelectedFile(new File(fileName));
         if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
         try {
-            controller.saveFile(fc.getSelectedFile());
-            JOptionPane.showMessageDialog(this, "Masterpiece saved!", "Success", JOptionPane.INFORMATION_MESSAGE);
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, "Failed to save: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
-        }
+            File t = fc.getSelectedFile();
+            if (!t.getAbsolutePath().endsWith(".dt")) t = new File(t.getAbsolutePath() + ".dt");
+            FileHandler.save(root, t); fileName = t.getName(); fire();
+            info("Masterpiece saved!");
+        } catch (Exception ex) { error("Failed to save: " + ex.getMessage()); }
     }
 
-    private void openFile() {
+    private void doOpen() {
         JFileChooser fc = new JFileChooser();
         if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
         try {
-            controller.openFile(fc.getSelectedFile());
-            drawingPanel.resetTransform();
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this,
-                    "Failed to open file: " + ex.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
-        }
+            root = FileHandler.load(fc.getSelectedFile());
+            selected = root; fileName = fc.getSelectedFile().getName();
+            canvas.layoutDirty = true; canvas.resetTransform(); fire();
+        } catch (Exception ex) { error("Failed to open file: " + ex.getMessage()); }
     }
 
-    private void exportImage() {
+    private void doExport() {
         JFileChooser fc = new JFileChooser();
-        fc.setSelectedFile(new File(model.getCurrentFileName().replace(".dt", ".png")));
+        fc.setSelectedFile(new File(fileName.replace(".dt", ".png")));
         if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
         try {
-            controller.exportImage(fc.getSelectedFile(), this);
-            JOptionPane.showMessageDialog(this, "Image exported successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, "Export failed: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            FileHandler.exportImage(root, layoutType, fc.getSelectedFile(), BG);
+            info("Image exported successfully!");
+        } catch (Exception ex) { error("Export failed: " + ex.getMessage()); }
+    }
+
+    private void info(String m) { JOptionPane.showMessageDialog(this, m, "Success", JOptionPane.INFORMATION_MESSAGE); }
+    private void error(String m) { JOptionPane.showMessageDialog(this, m, "Error", JOptionPane.ERROR_MESSAGE); }
+
+    /** 通用绘制：FileHandler 离屏导出也复用。 */
+    public static void render(Graphics2D g, MindNode root, Map<MindNode, Rectangle> ly, MindNode sel) {
+        drawConn(g, root, ly);
+        drawNodes(g, root, ly, sel);
+    }
+
+    private static void drawConn(Graphics2D g, MindNode n, Map<MindNode, Rectangle> ly) {
+        g.setStroke(new BasicStroke(1.8f)); g.setColor(BLUE);
+        Rectangle p = ly.get(n);
+        if (p == null) return;
+        for (MindNode c : n.getChildren()) {
+            Rectangle cr = ly.get(c);
+            if (cr == null) continue;
+            boolean right = cr.x > p.x;
+            int sx = right ? p.x + p.width : p.x, sy = p.y + p.height / 2;
+            int ex = right ? cr.x : cr.x + cr.width, ey = cr.y + cr.height / 2;
+            int half = right ? 40 : -40;
+            Path2D path = new Path2D.Double();
+            path.moveTo(sx, sy); path.curveTo(sx + half, sy, ex - half, ey, ex, ey);
+            g.draw(path);
+            drawConn(g, c, ly);
         }
     }
 
-    // ---------- FileExportTarget 实现 ----------
-
-    @Override
-    public DrawingPanel getDrawingPanel() {
-        return drawingPanel;
+    private static void drawNodes(Graphics2D g, MindNode n, Map<MindNode, Rectangle> ly, MindNode sel) {
+        for (MindNode c : n.getChildren()) drawNodes(g, c, ly, sel);
+        Rectangle l = ly.get(n);
+        if (l == null) return;
+        boolean s = (n == sel);
+        g.setColor(s ? SEL_BG : Color.WHITE);
+        g.fillRoundRect(l.x, l.y, l.width, l.height, 14, 14);
+        g.setStroke(new BasicStroke(s ? 2.5f : 1.5f));
+        g.setColor(s ? SEL_BD : BLUE);
+        g.drawRoundRect(l.x, l.y, l.width, l.height, 14, 14);
+        g.setColor(TEXT);
+        g.setFont(g.getFont().deriveFont(s ? Font.BOLD : Font.PLAIN, 14f));
+        g.drawString(n.getText(), l.x + 18, l.y + 12 + g.getFontMetrics().getAscent());
     }
 
-    @Override
-    public Color getBackgroundColor() {
-        return drawingPanel.getBgColor();
+    // ============================================================
+    private class DrawPanel extends JPanel {
+        double scale = 1.0, tx = 0, ty = 0;
+        Point lastPt;
+        boolean layoutDirty = true;
+        Map<MindNode, Rectangle> ly;
+
+        DrawPanel() {
+            setBackground(BG);
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            listeners.add(() -> { layoutDirty = true; repaint(); });
+
+            addMouseListener(new MouseAdapter() {
+                public void mousePressed(MouseEvent e) {
+                    lastPt = e.getPoint();
+                    if (ly == null) return;
+                    int wx = (int) ((e.getX() - tx) / scale), wy = (int) ((e.getY() - ty) / scale);
+                    MindNode c = findAt(root, wx, wy);
+                    if (c != null && c != selected) { selected = c; fire(); }
+                }
+            });
+            addMouseMotionListener(new MouseMotionAdapter() {
+                public void mouseDragged(MouseEvent e) {
+                    if (lastPt == null) return;
+                    tx += e.getX() - lastPt.x; ty += e.getY() - lastPt.y;
+                    lastPt = e.getPoint(); repaint();
+                }
+            });
+            addMouseWheelListener(e -> {
+                double os = scale;
+                scale = Math.max(0.2, Math.min(5.0, e.getWheelRotation() < 0 ? scale * 1.1 : scale / 1.1));
+                double k = scale / os;
+                tx = e.getX() - k * (e.getX() - tx);
+                ty = e.getY() - k * (e.getY() - ty);
+                repaint();
+            });
+            addComponentListener(new ComponentAdapter() {
+                public void componentResized(ComponentEvent e) {
+                    if (tx == 0 && ty == 0 && getWidth() > 0) { tx = getWidth() / 2.0; ty = getHeight() / 2.0; }
+                }
+            });
+        }
+
+        void resetTransform() {
+            int w = getWidth(), h = getHeight();
+            tx = w > 0 ? w / 2.0 : 0; ty = h > 0 ? h / 2.0 : 0;
+            scale = 1.0;
+            repaint();
+        }
+
+        MindNode findAt(MindNode n, int x, int y) {
+            Rectangle l = ly.get(n);
+            if (l != null && l.contains(x, y)) return n;
+            for (MindNode c : n.getChildren()) { MindNode f = findAt(c, x, y); if (f != null) return f; }
+            return null;
+        }
+
+        @Override
+        protected void paintComponent(Graphics g0) {
+            super.paintComponent(g0);
+            Graphics2D g = (Graphics2D) g0.create();
+            try {
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                if ((layoutDirty || ly == null) && root != null) {
+                    ly = Layout.compute(root, g.getFontMetrics(g.getFont().deriveFont(Font.BOLD, 14f)), layoutType);
+                    layoutDirty = false;
+                }
+                AffineTransform o = g.getTransform();
+                AffineTransform at = new AffineTransform(o);
+                at.translate(tx, ty); at.scale(scale, scale);
+                g.setTransform(at);
+                if (root != null && ly != null) render(g, root, ly, selected);
+                g.setTransform(o);
+            } finally { g.dispose(); }
+        }
+    }
+
+    // ============================================================
+    private class TreePanel extends JPanel {
+        final JTree tree = new JTree();
+        Map<MindNode, DefaultMutableTreeNode> map = new IdentityHashMap<>();
+        boolean syncing = false;
+
+        TreePanel() {
+            setLayout(new BorderLayout());
+            tree.setBorder(new EmptyBorder(10, 10, 10, 10));
+            tree.setShowsRootHandles(true);
+            tree.setBackground(Color.WHITE);
+            tree.setCellRenderer(new DefaultTreeCellRenderer() {
+                public Component getTreeCellRendererComponent(JTree t, Object v, boolean s, boolean ex, boolean lf, int row, boolean fc) {
+                    super.getTreeCellRendererComponent(t, v, s, ex, lf, row, fc);
+                    if (v instanceof DefaultMutableTreeNode) {
+                        Object u = ((DefaultMutableTreeNode) v).getUserObject();
+                        if (u instanceof MindNode) setText(((MindNode) u).getText());
+                    }
+                    return this;
+                }
+            });
+            JScrollPane sp = new JScrollPane(tree);
+            sp.setBorder(BorderFactory.createMatteBorder(0, 1, 0, 0, new Color(200, 200, 200)));
+            add(sp, BorderLayout.CENTER);
+
+            tree.addTreeSelectionListener(e -> {
+                if (syncing) return;
+                DefaultMutableTreeNode n = (DefaultMutableTreeNode) tree.getLastSelectedPathComponent();
+                if (n != null && n.getUserObject() instanceof MindNode) {
+                    MindNode m = (MindNode) n.getUserObject();
+                    if (m != selected) { selected = m; fire(); }
+                }
+            });
+
+            listeners.add(this::sync);
+        }
+
+        void sync() {
+            syncing = true;
+            try {
+                map = new IdentityHashMap<>();
+                tree.setModel(new DefaultTreeModel(build(root)));
+                for (int i = 0; i < tree.getRowCount(); i++) tree.expandRow(i);
+                DefaultMutableTreeNode tn = map.get(selected);
+                if (tn != null) {
+                    TreePath p = new TreePath(tn.getPath());
+                    tree.setSelectionPath(p); tree.scrollPathToVisible(p);
+                }
+            } finally { syncing = false; }
+        }
+
+        DefaultMutableTreeNode build(MindNode n) {
+            DefaultMutableTreeNode t = new DefaultMutableTreeNode(n);
+            map.put(n, t);
+            for (MindNode c : n.getChildren()) t.add(build(c));
+            return t;
+        }
     }
 }
