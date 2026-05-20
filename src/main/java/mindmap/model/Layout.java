@@ -10,7 +10,8 @@ import java.util.Map;
 public final class Layout {
     public static final String[] TYPES = { "Balanced", "Right-Flow", "Left-Flow" };
     public static final String DEFAULT = TYPES[0];
-    static final int H_GAP = 80, V_GAP = 25, PAD_X = 18, PAD_Y = 12;
+    public static final int H_GAP = 80;
+    static final int V_GAP = 25, PAD_X = 18, PAD_Y = 12;
 
     private Layout() {}
 

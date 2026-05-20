@@ -2,10 +2,9 @@ package mindmap.util;
 
 import mindmap.model.Layout;
 import mindmap.model.MindNode;
-import mindmap.ui.MainFrame;
+import mindmap.model.Renderer;
 
 import javax.imageio.ImageIO;
-import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
@@ -31,7 +30,7 @@ public class FileHandler {
         }
     }
 
-    public static void exportImage(MindNode root, String layoutType, File f, Color bg) throws Exception {
+    public static void exportImage(MindNode root, String layoutType, File f) throws Exception {
         BufferedImage probe = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
         Graphics2D pg = probe.createGraphics();
         pg.setFont(pg.getFont().deriveFont(Font.BOLD, 14f));
@@ -44,9 +43,9 @@ public class FileHandler {
         Graphics2D g = img.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-        g.setColor(bg); g.fillRect(0, 0, img.getWidth(), img.getHeight());
+        g.setColor(Renderer.BG); g.fillRect(0, 0, img.getWidth(), img.getHeight());
         g.translate(-b.x + m, -b.y + m);
-        MainFrame.render(g, root, ly, null);
+        Renderer.render(g, root, ly, null);
         g.dispose();
 
         String n = f.getName().toLowerCase();

@@ -2,6 +2,7 @@ package mindmap.ui;
 
 import mindmap.model.Layout;
 import mindmap.model.MindNode;
+import mindmap.model.Renderer;
 import mindmap.util.FileHandler;
 
 import javax.swing.*;
@@ -13,7 +14,6 @@ import javax.swing.tree.TreePath;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.geom.AffineTransform;
-import java.awt.geom.Path2D;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -21,9 +21,6 @@ import java.util.List;
 import java.util.Map;
 
 public class MainFrame extends JFrame {
-    static final Color BG = new Color(245, 247, 250), BLUE = new Color(74, 144, 226),
-            SEL_BG = new Color(225, 238, 252), SEL_BD = new Color(208, 2, 27), TEXT = new Color(50, 50, 50);
-
     private MindNode root, selected;
     private String layoutType = Layout.DEFAULT, fileName = "Untitled.dt";
     private final List<Runnable> listeners = new ArrayList<>();
@@ -55,6 +52,9 @@ public class MainFrame extends JFrame {
 
     private void fire() { for (Runnable r : listeners) r.run(); }
 
+    /** 修改模型 → 标记重排 → 通知所有监听器。 */
+    private void mutate(Runnable r) { r.run(); canvas.layoutDirty = true; fire(); }
+
     private void newMap() {
         root = new MindNode("Java Core Technology");
         for (String s : new String[]{"Collections", "Concurrency", "JVM Architecture", "I/O & NIO"})
@@ -72,7 +72,7 @@ public class MainFrame extends JFrame {
     private void editText(String title, java.util.function.Consumer<String> action) {
         if (selected == null) return;
         String t = prompt("Node Text:", title, "New Node");
-        if (t != null && !t.trim().isEmpty()) { action.accept(t.trim()); canvas.layoutDirty = true; fire(); }
+        if (t != null && !t.trim().isEmpty()) mutate(() -> action.accept(t.trim()));
     }
 
     private JToolBar buildToolbar() {
@@ -94,12 +94,11 @@ public class MainFrame extends JFrame {
         addBtn(bar, "Rename", e -> {
             if (selected == null) return;
             String t = prompt("Rename Node:", "Rename", selected.getText());
-            if (t != null && !t.trim().isEmpty()) { selected.setText(t.trim()); canvas.layoutDirty = true; fire(); }
+            if (t != null && !t.trim().isEmpty()) mutate(() -> selected.setText(t.trim()));
         });
         addBtn(bar, "Delete", e -> {
-            if (selected != null && selected != root) {
-                selected.remove(); selected = root; canvas.layoutDirty = true; fire();
-            }
+            if (selected != null && selected != root)
+                mutate(() -> { selected.remove(); selected = root; });
         });
         bar.add(Box.createHorizontalStrut(10));
         bar.add(new JLabel(" Layout: "));
@@ -109,7 +108,7 @@ public class MainFrame extends JFrame {
         combo.setSelectedItem(layoutType);
         combo.addActionListener(e -> {
             String s = (String) combo.getSelectedItem();
-            if (s != null && !s.equals(layoutType)) { layoutType = s; canvas.layoutDirty = true; fire(); }
+            if (s != null && !s.equals(layoutType)) mutate(() -> layoutType = s);
         });
         bar.add(combo);
         return bar;
@@ -155,52 +154,13 @@ public class MainFrame extends JFrame {
         fc.setSelectedFile(new File(fileName.replace(".dt", ".png")));
         if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
         try {
-            FileHandler.exportImage(root, layoutType, fc.getSelectedFile(), BG);
+            FileHandler.exportImage(root, layoutType, fc.getSelectedFile());
             info("Image exported successfully!");
         } catch (Exception ex) { error("Export failed: " + ex.getMessage()); }
     }
 
     private void info(String m) { JOptionPane.showMessageDialog(this, m, "Success", JOptionPane.INFORMATION_MESSAGE); }
     private void error(String m) { JOptionPane.showMessageDialog(this, m, "Error", JOptionPane.ERROR_MESSAGE); }
-
-    /** 通用绘制：FileHandler 离屏导出也复用。 */
-    public static void render(Graphics2D g, MindNode root, Map<MindNode, Rectangle> ly, MindNode sel) {
-        drawConn(g, root, ly);
-        drawNodes(g, root, ly, sel);
-    }
-
-    private static void drawConn(Graphics2D g, MindNode n, Map<MindNode, Rectangle> ly) {
-        g.setStroke(new BasicStroke(1.8f)); g.setColor(BLUE);
-        Rectangle p = ly.get(n);
-        if (p == null) return;
-        for (MindNode c : n.getChildren()) {
-            Rectangle cr = ly.get(c);
-            if (cr == null) continue;
-            boolean right = cr.x > p.x;
-            int sx = right ? p.x + p.width : p.x, sy = p.y + p.height / 2;
-            int ex = right ? cr.x : cr.x + cr.width, ey = cr.y + cr.height / 2;
-            int half = right ? 40 : -40;
-            Path2D path = new Path2D.Double();
-            path.moveTo(sx, sy); path.curveTo(sx + half, sy, ex - half, ey, ex, ey);
-            g.draw(path);
-            drawConn(g, c, ly);
-        }
-    }
-
-    private static void drawNodes(Graphics2D g, MindNode n, Map<MindNode, Rectangle> ly, MindNode sel) {
-        for (MindNode c : n.getChildren()) drawNodes(g, c, ly, sel);
-        Rectangle l = ly.get(n);
-        if (l == null) return;
-        boolean s = (n == sel);
-        g.setColor(s ? SEL_BG : Color.WHITE);
-        g.fillRoundRect(l.x, l.y, l.width, l.height, 14, 14);
-        g.setStroke(new BasicStroke(s ? 2.5f : 1.5f));
-        g.setColor(s ? SEL_BD : BLUE);
-        g.drawRoundRect(l.x, l.y, l.width, l.height, 14, 14);
-        g.setColor(TEXT);
-        g.setFont(g.getFont().deriveFont(s ? Font.BOLD : Font.PLAIN, 14f));
-        g.drawString(n.getText(), l.x + 18, l.y + 12 + g.getFontMetrics().getAscent());
-    }
 
     // ============================================================
     private class DrawPanel extends JPanel {
@@ -210,7 +170,7 @@ public class MainFrame extends JFrame {
         Map<MindNode, Rectangle> ly;
 
         DrawPanel() {
-            setBackground(BG);
+            setBackground(Renderer.BG);
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             listeners.add(() -> { layoutDirty = true; repaint(); });
 
@@ -253,10 +213,9 @@ public class MainFrame extends JFrame {
         }
 
         MindNode findAt(MindNode n, int x, int y) {
-            Rectangle l = ly.get(n);
-            if (l != null && l.contains(x, y)) return n;
             for (MindNode c : n.getChildren()) { MindNode f = findAt(c, x, y); if (f != null) return f; }
-            return null;
+            Rectangle l = ly.get(n);
+            return (l != null && l.contains(x, y)) ? n : null;
         }
 
         @Override
@@ -274,7 +233,7 @@ public class MainFrame extends JFrame {
                 AffineTransform at = new AffineTransform(o);
                 at.translate(tx, ty); at.scale(scale, scale);
                 g.setTransform(at);
-                if (root != null && ly != null) render(g, root, ly, selected);
+                if (root != null && ly != null) Renderer.render(g, root, ly, selected);
                 g.setTransform(o);
             } finally { g.dispose(); }
         }
