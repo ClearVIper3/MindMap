@@ -1,236 +1,252 @@
-# 📚 MindMap 项目学习规划
+# 📚 MindMap 项目学习规划（精简版）
 
-> 面向**从零开始**的新读者。完整通读 ≈ **一个工作日（6～8 h）**；如果只求"看懂主流程"≈ **2 h**。
+> 面向**从零开始**的新读者。完整通读 ≈ **3～4 h**；如果只求"看懂主流程"≈ **1 h**。
 >
-> 本指南配套阅读：[README.md](./README.md) 架构总览 · [pom.xml](./pom.xml) 构建配置。
+> 配套阅读：[README.md](./README.md) 架构总览 · [pom.xml](./pom.xml) 构建配置。
 
 ---
 
 ## 0. 先决条件 Self-Check
 
-在开始前，请先确认自己掌握以下基础（如不熟悉，对照"补课资源"先补）：
-
 | 知识点 | 熟练度要求 | 补课资源 |
 |---|---|---|
-| Java 基础语法、泛型、枚举 | ★★★ 必须 | 《Java 核心技术 卷 I》 |
-| 集合框架（`List`、`Map`）| ★★★ 必须 | 同上 |
-| 接口 / 抽象类 / 多态 | ★★★ 必须 | 同上 |
-| Lambda 与 `Supplier` / `Consumer` | ★★ 推荐 | Java 8 Stream 教程 |
-| Swing：`JFrame` / `JPanel` / `Graphics2D` | ★★ 推荐 | Oracle Swing Tutorial |
-| 设计模式：MVC、观察者、策略 | ★ 了解概念即可 | 《Head First 设计模式》前 3 章 |
+| Java 基础语法、泛型、Lambda | ★★★ 必须 | 《Java 核心技术 卷 I》 |
+| 集合框架（`List` / `Map` / `IdentityHashMap`）| ★★★ 必须 | 同上 |
+| 接口 / 内部类 / 匿名类 | ★★★ 必须 | 同上 |
+| Swing：`JFrame` / `JPanel` / `Graphics2D` / EDT | ★★ 推荐 | Oracle Swing Tutorial |
+| 递归与树遍历（前序/后序）| ★★★ 必须 | 任一数据结构教材 |
+| 仿射变换 `AffineTransform`（平移 + 缩放）| ★ 了解概念即可 | Java 2D 入门 |
 
-> 💡 **不需要**提前掌握：JavaFX、Spring、并发编程、网络编程。项目是纯单线程 Swing 桌面应用。
+> 💡 **不需要**提前掌握：JavaFX、Spring、并发、网络。本项目是单线程纯 Swing 桌面应用。
 
 ---
 
 ## 1. 项目整体视图
 
-### 代码量一览
+### 代码量一览（共 6 文件、约 530 行）
 
-| 目录 | 文件数 | 行数（约） | 关键角色 |
+| 包 | 文件 | 行数 | 角色 |
 |---|---|---|---|
-| `app/`        | 1  | 23   | 程序入口 |
-| `model/`      | 4  | 150  | 数据与事件源 |
-| `controller/` | 1  | 110  | 业务协调 |
-| `engine/`     | 7  | 220  | 布局算法 |
-| `ui/`         | 5  | 510  | 界面与交互 |
-| `util/`       | 1  | 90   | 文件 I/O |
-| **合计**      | **19** | **~1500** | —— |
+| `app/`   | `MindMapApp.java`     | ~16  | 程序入口（EDT + LookAndFeel） |
+| `model/` | `MindNode.java`       | ~36  | 树节点（纯数据，可序列化） |
+| `model/` | `Layout.java`         | ~84  | 布局算法（三种类型，纯计算） |
+| `model/` | `Renderer.java`       | ~58  | 纯绘制 + 配色常量 |
+| `ui/`    | `MainFrame.java`      | ~290 | 主窗口（工具栏 + 画布 + 树，含 2 个内部类） |
+| `util/`  | `FileHandler.java`    | ~54  | 序列化保存/加载、PNG 导出 |
 
-> 📏 参照感受：Spring Boot 一个最小 HelloWorld 依赖链 > 10 万行；本项目约为它的 **1.5%**。完全在一天之内通读并理解的量级。
+> 📏 这是它前一版的约 **35%** 体量（19 文件 1500 行 → 6 文件 530 行）。所有功能保持不变。
 
-### 模块依赖俯视图
+### 模块依赖俯视图（无环）
 
 ```
-           ┌──────────┐
-           │   app/   │  (入口，仅 new 出其它对象)
-           └────┬─────┘
-                │
-    ┌───────────▼────────────┐
-    │          ui/           │  Swing 组件：窗口、工具栏、画布
-    └──┬──────────┬──────────┘
-       │          │
-       ▼          ▼
-┌──────────┐ ┌──────────┐
-│controller│ │  engine/ │  纯算法，无 Swing 依赖
-└────┬─────┘ └────┬─────┘
-     │            │
-     ▼            ▼
-  ┌──────────────────┐
-  │      model/      │  纯数据 + 事件源
-  └──────────────────┘
-           ▲
-           │
-       ┌───┴────┐
-       │ util/  │  纯工具
-       └────────┘
+        ┌─────────┐
+        │  app/   │  入口
+        └────┬────┘
+             ▼
+        ┌─────────┐
+        │   ui/   │  Swing 组件 + 事件
+        └─┬─────┬─┘
+          │     │
+          ▼     ▼
+   ┌─────────┐ ┌──────────┐
+   │ model/  │◄┤  util/   │  纯工具
+   └─────────┘ └──────────┘
 ```
 
-**依赖方向永远向下**，跨越箭头反向依赖是架构 bug，阅读时可以当作校验点。
+依赖永远向下：`util` 依赖 `model`，但 **不依赖 `ui`**——这意味着导出 PNG 与屏幕绘制共用同一份 `Renderer`，无需拉起任何窗口就可单测。
 
 ---
 
 ## 2. 分阶段学习路径（推荐顺序）
 
-### 🎯 Phase 1 — 数据层（30 min · 难度 ★☆☆☆☆）
+### 🎯 Phase 1 — 数据模型（15 min · 难度 ★☆☆☆☆）
 
-**目标**：理解"思维导图"在内存中究竟长什么样、怎么通知外界"我变了"。
+**目标**：理解"思维导图"在内存中长什么样。
 
-#### 📖 阅读顺序
-1. [`MindNode.java`](./src/main/java/mindmap/model/MindNode.java) — 52 行
-2. [`ChangeType.java`](./src/main/java/mindmap/model/ChangeType.java) — 16 行
-3. [`ChangeListener.java`](./src/main/java/mindmap/model/ChangeListener.java) — 单方法接口
-4. [`MindMapModel.java`](./src/main/java/mindmap/model/MindMapModel.java) — 72 行
+#### 📖 阅读
+- [`MindNode.java`](./src/main/java/mindmap/model/MindNode.java) — 树节点
 
 #### ✅ 通关自检
 - [ ] `MindNode` 有哪些字段？为什么**没有** `x, y` 坐标？
-- [ ] `ChangeType` 有 4 种事件：`STRUCTURE_CHANGED` / `SELECTION_CHANGED` / `LAYOUT_CHANGED` / `FILE_CHANGED`，各对应什么场景？
-- [ ] `MindMapModel.fire()` 为什么要 `new ArrayList<>(listeners)` 遍历？（答：防止监听器回调中再注册/移除导致并发修改）
-- [ ] 为什么 `setSelectedNode` 里要判断"相同则 return"？
+- [ ] `parent` 字段为什么标 `transient`？`restoreParents()` 的作用？
+- [ ] `addSiblingAfter` 为什么需要操作 `parent.children`，而不是当前节点自己？
+- [ ] `remove()` 为什么对 root 是空操作？
 
-#### 💻 动手练习
-1. 在 `MindMapModel` 里增加一个默认节点 `"Networking"`。运行后观察是否自动出现在画布上。
-2. 写一个临时的匿名 `ChangeListener`，在控制台打印每次事件类型，感受事件流触发频率。
+#### 💻 动手
+在 `MainFrame.newMap()` 中追加一个根节点子项 `"Networking"`，运行后观察是否自动出现在画布与左侧 JTree 中。
 
 ---
 
-### 🎯 Phase 2 — 算法层（45 min · 难度 ★★★☆☆）
+### 🎯 Phase 2 — 布局算法（45 min · 难度 ★★★☆☆）
 
-**目标**：搞懂"一棵树 → 一堆坐标"这个核心数学问题是怎么解的。
+**目标**：搞懂"一棵树 → 一组矩形"这个核心数学问题是怎么解的。
 
-#### 📖 阅读顺序
-1. [`NodeLayout.java`](./src/main/java/mindmap/engine/NodeLayout.java) — 单节点坐标/尺寸容器
-2. [`LayoutResult.java`](./src/main/java/mindmap/engine/LayoutResult.java) — 整张图的布局结果
-3. [`LayoutEngine.java`](./src/main/java/mindmap/engine/LayoutEngine.java) — 策略接口（**重点**）
-4. [`AutoLayoutEngine.java`](./src/main/java/mindmap/engine/AutoLayoutEngine.java) — 核心算法实现
-5. [`DirectionalLayoutEngine.java`](./src/main/java/mindmap/engine/DirectionalLayoutEngine.java) — 变体
-6. [`LayoutEngineFactory.java`](./src/main/java/mindmap/engine/LayoutEngineFactory.java) — 注册表
+#### 📖 阅读
+- [`Layout.java`](./src/main/java/mindmap/model/Layout.java) — 一站式布局
 
-> 🗒️ [`LayoutManager.java`](./src/main/java/mindmap/engine/LayoutManager.java) 是 `@Deprecated` 兼容接口，**跳过**。
+#### 🧠 核心算法
 
-#### 🧠 核心算法理解
-
-`AutoLayoutEngine` 采用两遍递归：
+`Layout.compute(root, fm, type)` 分两遍递归：
 
 ```
-① 后序遍历（Bottom-Up）：计算每棵子树的"包围盒高度"
-   subtreeHeight(node) = Σ subtreeHeight(child) + padding
-   叶子节点  subtreeHeight = nodeHeight
+① sizes(node)：根据 FontMetrics 算出每个节点矩形的 (w, h)
+   w = textWidth + 2*PAD_X,   h = textHeight + 2*PAD_Y
 
-② 前序遍历（Top-Down）：按子树高度比例分配 Y 坐标
-   父节点居中于所有子树占据的总高度之中
+② place(node, x, y, ...)：自底向上累计每棵子树总高度，
+   再自顶向下按比例分配 Y 坐标，使父子居中对齐
 ```
 
-> 📐 这是经典的 **Reingold-Tilford 树布局算法**的简化版。推荐阅读 Wikipedia "Tidy Trees" 条目加深理解。
+三种布局共享同一份核心，仅"子节点放左还是放右"不同：
+
+| 类型 | 子节点分布 |
+|---|---|
+| **Balanced**   | 偶序号放右、奇序号放左（默认） |
+| **Right-Flow** | 全部向右延伸 |
+| **Left-Flow**  | 全部向左延伸 |
+
+> 📐 这是经典 **Reingold-Tilford 树布局**的简化版（非严格 tidy 版）。
 
 #### ✅ 通关自检
-- [ ] 为什么要先算所有子树高度，再分配 Y 坐标？能一次完成吗？
-- [ ] `LayoutEngineFactory` 用了 `Supplier<LayoutEngine>` 而非直接存实例，好处是什么？
-- [ ] 如果我想加一种"圆形放射状布局"，需要改动几个文件？（答：新建 1 个 Engine 类 + Factory 注册 1 行）
-- [ ] `LayoutResult` 和 `NodeLayout` 为什么拆成两个类？合成一个不行吗？
+- [ ] 为什么要先算所有子树高度，再分配 Y 坐标？能合并成一遍递归吗？
+- [ ] `place` 里 `subtreeHeight` 数组有什么作用？为什么需要它？
+- [ ] `Layout.bounds(...)` 用于什么场景？（提示：PNG 导出时算画布尺寸）
+- [ ] 想新增一种"圆形放射状布局"，需要改动几个文件？（答：只改 `Layout.java`）
 
-#### 💻 动手练习
-1. 在 `AutoLayoutEngine` 里把节点间垂直间距 `+10px`，观察画布变化。
-2. 给 `LayoutEngineFactory` 注册一个"Balanced-Wide" 布局（映射到 `AutoLayoutEngine`，但你可以新建一个类调整水平间距），然后在工具栏下拉框里验证它出现了。
+#### 💻 动手
+1. 把 `V_GAP` 改成 50，观察画布间距变化。
+2. 在 `Layout.TYPES` 数组里加一项 `"Compact"`，并在 `place` 里把它当作 `Balanced` 处理但 `H_GAP` 减半，验证下拉框出现新选项。
 
 ---
 
-### 🎯 Phase 3 — 控制层（20 min · 难度 ★★☆☆☆）
+### 🎯 Phase 3 — 绘制（20 min · 难度 ★★☆☆☆）
 
-**目标**：理解"用户点了按钮"到"数据真的变了"之间发生了什么。
+**目标**：理解"矩形坐标 → 屏幕像素"这一步发生了什么。
 
-#### 📖 阅读顺序
-1. [`MindMapController.java`](./src/main/java/mindmap/controller/MindMapController.java) — 111 行
+#### 📖 阅读
+- [`Renderer.java`](./src/main/java/mindmap/model/Renderer.java) — 纯绘制
 
 #### 🔑 关键约定
-- **View 永远不直接改 Model**，必须通过 `Controller` 的方法调用
-- `Controller` 在改完 Model 后负责 `fire(ChangeType)`
-- `Controller` **不依赖任何具体 Swing 组件类型**（例外：`DrawingPanel` 通过内部接口 `FileExportTarget` 解耦传入）
+- **无状态**：所有数据通过参数传入，类没有任何字段
+- **后序绘制**：子节点先画、父节点后画 → 父节点会盖在子节点上方（更突出）
+- **贝塞尔连线**：`Path2D.curveTo` 在父子节点之间画 S 形曲线，更优雅
+- **选中态视觉**：浅蓝填充 + 红色加粗描边 + 文字加粗
 
 #### ✅ 通关自检
-- [ ] `deleteSelected()` 为什么要判断 `selected == model.getRoot()`？
-- [ ] `addSiblingToSelected` 为什么要求 `selected.getParent() != null`？
-- [ ] 为什么抽象出 `FileExportTarget` 接口？（答：避免 Controller 直接 `import DrawingPanel`，保持 Controller → View 的禁止依赖方向）
-- [ ] 如果要实现 **撤销/重做**，你会怎么改造 Controller？（提示：命令模式 + 操作栈）
+- [ ] `drawConn` 里 `right` 布尔值如何判断？为什么决定连线方向？
+- [ ] 选中节点的视觉差异由哪几行代码控制？
+- [ ] 既然 `Renderer` 是无状态的，能不能复用它把当前导图导出成 SVG？需要改什么？
 
-#### 💻 动手练习
-1. 新增一个 Controller 方法 `moveSelectedUp()`：把选中节点在其兄弟列表中上移一位。记得 `fire(STRUCTURE_CHANGED)`。
-2. 在 `ToolbarView` 中加一个 "⬆ Move Up" 按钮调用它。
+#### 💻 动手
+给选中节点增加一圈**黄色阴影**：在画白底圆角矩形之前，先用半透明黄色画一个稍大的圆角矩形即可。
 
 ---
 
-### 🎯 Phase 4 — 视图层（60 min · 难度 ★★★★☆）
+### 🎯 Phase 4 — UI 主框架（60 min · 难度 ★★★★☆）
 
-**目标**：理解 Swing 如何把计算结果真正画到屏幕上，以及鼠标事件如何流回 Controller。
+**目标**：理解 Swing 如何把所有组件串起来，事件如何流动，缩放/平移如何实现。
 
-#### 📖 阅读顺序（由简入繁）
-1. [`MainFrame.java`](./src/main/java/mindmap/ui/MainFrame.java) — 装配窗口
-2. [`ToolbarView.java`](./src/main/java/mindmap/ui/ToolbarView.java) — 140 行
-3. [`StructureTreeView.java`](./src/main/java/mindmap/ui/StructureTreeView.java) — JTree 适配
-4. [`MindMapRenderer.java`](./src/main/java/mindmap/ui/MindMapRenderer.java) — 79 行 **纯绘制**
-5. [`DrawingPanel.java`](./src/main/java/mindmap/ui/DrawingPanel.java) — **重点**，含缩放/平移/拖动
+#### 📖 阅读
+- [`MainFrame.java`](./src/main/java/mindmap/ui/MainFrame.java)（含两个内部类 `DrawPanel` / `TreePanel`）
 
 #### 🔑 关键概念
-- **EDT**：所有 Swing 操作必须在 Event Dispatch Thread 上进行
-- **`paintComponent(Graphics g)`**：Swing 的绘制入口。不要自己调用，而是 `repaint()` 请求重绘
-- **`AffineTransform`**：`DrawingPanel` 用它做缩放和平移，鼠标坐标需要反向变换回模型坐标
-- **Renderer 无状态**：`MindMapRenderer` 只接受 `LayoutResult` + `Graphics2D` 参数，本身不持有任何字段；未来可直接复用它导出 SVG/PNG
+
+**(1) 极简事件总线**
+
+没有 Controller、没有 ChangeType 枚举，只用一个 `List<Runnable>`：
+
+```java
+private final List<Runnable> listeners = new ArrayList<>();
+private void fire() { for (Runnable r : listeners) r.run(); }
+private void mutate(Runnable r) { r.run(); canvas.layoutDirty = true; fire(); }
+```
+
+所有"修改模型 → 标记重排 → 通知 UI"的样板都收拢到 `mutate(...)` 一行。
+
+**(2) 缩放 / 平移**
+
+`DrawPanel` 持有三个标量 `(scale, tx, ty)`，绘制时一次性应用：
+
+```java
+g.translate(tx, ty);
+g.scale(scale, scale);
+Renderer.render(g, root, ly, selected);
+```
+
+滚轮缩放以**鼠标点为锚点**：
+```
+tx = e.x - (newScale/oldScale) * (e.x - tx);
+```
+
+**(3) 命中测试**
+
+`DrawPanel.findAt` 是后序递归——子节点优先命中，避免父节点重叠时盖住子节点。
+
+**(4) JTree 同步**
+
+`TreePanel` 用 `IdentityHashMap<MindNode, DefaultMutableTreeNode>` 把模型节点映射到树节点；同步时用 `syncing` 标志位防止双向回调死循环。
 
 #### ✅ 通关自检
-- [ ] `DrawingPanel` 收到 `SELECTION_CHANGED` 时做什么？收到 `STRUCTURE_CHANGED` 时做什么？两者的性能差异？
-- [ ] 鼠标点击画布 `(px, py)` 像素坐标，如何确定点到了哪个节点？
-- [ ] 为什么 `Renderer` 不持有 `MindNode`？（答：保持无状态，可独立测试、可用于导出）
-- [ ] `ToolbarView` 的下拉框选项是怎么来的？（答：`LayoutEngineFactory.availableLayouts()`，所以新增布局后下拉框会自动更新）
+- [ ] 鼠标点击屏幕坐标 `(e.x, e.y)`，怎样还原为模型坐标？为什么要除以 `scale` 再减 `tx`？
+- [ ] `mutate(...)` 与 `fire()` 何时该用哪个？
+- [ ] 切换布局类型属于"模型变更"吗？为什么也要走 `mutate`？
+- [ ] 为什么 `TreePanel.sync()` 要用 `syncing` 标志？去掉会怎样？
+- [ ] `paintComponent` 里 `g.create()` 与 `g.setTransform(o)` 的配对作用是什么？
 
-#### 💻 动手练习
-1. 在 `MindMapRenderer` 中给选中节点增加一圈阴影效果。
-2. 在 `DrawingPanel` 中加入 Ctrl + 滚轮缩放（可能已经实现，观察现状再决定是增强还是调参）。
+#### 💻 动手
+1. 加键盘快捷键：`Enter` = 添加子节点、`Delete` = 删除选中（`addKeyBinding` 或 `InputMap`）。
+2. 给画布右下角画一个"当前缩放比"小标签（`100%`、`50%`...）。
 
 ---
 
-### 🎯 Phase 5 — 工具层（10 min · 难度 ★☆☆☆☆）
+### 🎯 Phase 5 — 文件 I/O（10 min · 难度 ★☆☆☆☆）
 
-**目标**：理解文件保存/读取/导出图片如何实现。
+**目标**：理解保存/加载/导出图片的实现。
 
-#### 📖 阅读顺序
-1. [`FileHandler.java`](./src/main/java/mindmap/util/FileHandler.java) — 90 行
+#### 📖 阅读
+- [`FileHandler.java`](./src/main/java/mindmap/util/FileHandler.java)
 
 #### ✅ 通关自检
-- [ ] 保存文件用的是什么序列化机制？有什么优缺点？
-- [ ] 为什么 `MindNode` 要实现 `Serializable`？
-- [ ] 导出图片是离屏渲染还是直接截屏 `DrawingPanel`？
+- [ ] `.dt` 文件用的是什么序列化机制？优缺点？
+- [ ] 加载后为什么必须调 `restoreParents()`？
+- [ ] PNG 导出是"截屏画布"还是"离屏重画"？为什么这样设计？
+- [ ] 导出图片时为什么要先 `Layout.compute` 一次再 `Layout.bounds`？
+
+#### 💻 动手
+让 `exportImage` 支持"裁剪 50px margin → 0px"——观察图片紧贴节点是否更好看。
 
 ---
 
 ### 🎯 Phase 6 — 启动入口（5 min · 难度 ★☆☆☆☆）
 
-#### 📖 阅读顺序
-1. [`MindMapApp.java`](./src/main/java/mindmap/app/MindMapApp.java) — 23 行
+#### 📖 阅读
+- [`MindMapApp.java`](./src/main/java/mindmap/app/MindMapApp.java)
 
 #### ✅ 通关自检
-- [ ] `main` 方法为什么要把窗口创建放进 `SwingUtilities.invokeLater`？
-- [ ] 对象装配顺序是 `Model → Controller → View`，反过来行吗？为什么？
+- [ ] `main` 方法为什么把窗口创建放进 `SwingUtilities.invokeLater`？
+- [ ] `setLookAndFeel(getSystemLookAndFeelClassName())` 失败时如何容错？
 
 ---
 
 ## 3. 全流程沙盘推演
 
-完成上面 6 个 Phase 后，闭卷回答：**"用户点击工具栏'添加子节点'按钮后，屏幕上为什么会出现一个新节点？"**
+完成上面 6 个 Phase 后，闭卷回答：**"用户点击工具栏 `+ Child` 后，屏幕上为什么会出现一个新节点？"**
 
-标准答案应当覆盖以下 8 个步骤：
+标准答案应当覆盖以下 7 步：
 
 ```
-1. ToolbarView 的 JButton ActionListener 被触发
-2. 调用 MindMapController.addChildToSelected(text)
-3. Controller 找到 model.getSelectedNode()，对其 addChild(new MindNode(text))
-4. Controller 调用 model.fire(STRUCTURE_CHANGED)
-5. MindMapModel 遍历 listeners，调用 onChange(STRUCTURE_CHANGED)
-   - StructureTreeView：重建 JTree 模型
-   - DrawingPanel：标记"布局需重算"并 repaint()
-6. Swing EDT 调度到 DrawingPanel.paintComponent()
-7. DrawingPanel 通过 LayoutEngineFactory.create(currentLayout) 拿到引擎
-   调用 engine.calculateLayout(root, fm, layoutType) 得到 LayoutResult
-8. MindMapRenderer.render(g, layoutResult, selectedNode) 把像素画出来
+1. JButton 的 ActionListener 被触发 → 进入 lambda → 弹出 JOptionPane 输入文本
+2. mutate(() -> selected.addChild(new MindNode(t))) 被调用
+3. mutate 体内：
+     ① 修改模型（addChild）
+     ② canvas.layoutDirty = true
+     ③ fire() 通知所有 Runnable 监听器
+4. 监听器触发：
+     ① DrawPanel：repaint()
+     ② TreePanel：sync() 重建 JTree
+     ③ status 标签：刷新文字
+5. Swing EDT 调度到 DrawPanel.paintComponent
+6. 检测到 layoutDirty=true → Layout.compute(...) 重算所有矩形
+7. Renderer.render(g, root, ly, selected) 把像素画出来
 ```
 
 如果任一环节说不清，回到对应 Phase 重读。
@@ -239,70 +255,65 @@
 
 ## 4. 渐进式改造练习（Optional · 进阶）
 
-按难度从低到高，建议挑 2～3 个做：
-
-| # | 练习 | 难度 | 涉及层 | 收获 |
+| # | 练习 | 难度 | 涉及文件 | 收获 |
 |---|---|---|---|---|
-| 1 | 添加键盘快捷键（Enter=添加子节点，Tab=添加兄弟）| ★★ | ui + controller | 熟悉 Swing KeyBinding |
-| 2 | 新增"节点颜色"字段，按层级自动上色 | ★★ | model + renderer | 理解字段穿透 |
-| 3 | 实现撤销 / 重做（命令模式） | ★★★★ | controller | 设计模式实战 |
-| 4 | 把 `ObjectOutputStream` 序列化换成 JSON | ★★★ | util | 格式演进与兼容 |
-| 5 | 新增圆形放射状布局 | ★★★ | engine | 策略模式扩展 |
-| 6 | 超大树布局用 `SwingWorker` 异步计算 | ★★★★ | ui + engine | 并发 + UI 线程 |
+| 1 | 添加键盘快捷键（Enter / Tab / Delete）         | ★★    | `MainFrame`           | InputMap / ActionMap |
+| 2 | 节点字段加 `color`，按层级自动上色             | ★★    | `MindNode` + `Renderer` | 字段穿透 |
+| 3 | 实现撤销 / 重做（命令栈）                      | ★★★★  | `MainFrame`           | 命令模式 |
+| 4 | 把 `ObjectOutputStream` 换成 JSON              | ★★★   | `FileHandler`         | 格式演进 |
+| 5 | 新增"圆形放射状布局"                          | ★★★   | `Layout`              | 算法扩展 |
+| 6 | 双击节点直接原地编辑文字（用 `JTextField` 浮层）| ★★★★  | `MainFrame.DrawPanel` | Swing 组件叠加 |
 
 ---
 
 ## 5. 阅读节奏建议
 
-### 📅 一日通关版（6～8 h）
-- 上午：Phase 1 + 2（1.5 h）+ 动手练习（1 h）
-- 下午：Phase 3 + 4（1.5 h）+ 动手练习（1.5 h）
-- 傍晚：Phase 5 + 6 + 沙盘推演（1 h）
+### 📅 半日通关版（3～4 h）
+- 第 1 小时：Phase 1 + 2（数据 + 算法）
+- 第 2 小时：Phase 3 + 4 前半（绘制 + 事件总线）
+- 第 3 小时：Phase 4 后半（缩放/平移/JTree）
+- 第 4 小时：Phase 5 + 6 + 沙盘推演
 
-### 📅 一周精读版（每天 1 h）
-- Day 1：Phase 1，做完所有练习
-- Day 2：Phase 2，手画算法执行过程
-- Day 3：Phase 3，完成"Move Up"练习
-- Day 4：Phase 4 前半（MainFrame + ToolbarView + TreeView）
-- Day 5：Phase 4 后半（Renderer + DrawingPanel）
-- Day 6：Phase 5 + 6 + 沙盘推演
-- Day 7：挑一个改造练习实战
+### 📅 三日精读版（每天 1 h）
+- Day 1：Phase 1 + 2，手画算法执行过程
+- Day 2：Phase 3 + 4，跑一次 `mutate` 全链路
+- Day 3：Phase 5 + 6 + 沙盘 + 挑一个改造练习
 
 ---
 
 ## 6. 常见困惑 FAQ
 
-**Q1：为什么 `LayoutManager.java` 是空的还留着？**
-A：和 `java.awt.LayoutManager` 重名容易误导读者，P1 阶段改名为 `LayoutEngine`，但为了不破坏可能的外部引用，保留空的 `@Deprecated` 子接口做过渡。阅读时可以**完全忽略**它。
+**Q1：为什么没有 Controller / Service / Repository 这些"标准分层"？**
+A：本项目主动选择了"够用就好"的极简风格——所有 UI 事件直接在 `MainFrame` 里 lambda + `mutate(...)` 处理，5 行做完一件事，没有跨文件跳转。如果未来真的需要撤销/重做、权限、日志、远程同步这类横切关注点，再单独抽 Controller 也来得及。**先别为了模式而模式。**
 
-**Q2：为什么 Model 不持有坐标 (x, y)？**
-A：坐标是"布局的产物"而非"数据的本质"。同一棵树可以用不同布局算法产生不同坐标。把坐标从 Model 中剥离，才能让 Model 纯净、可序列化、可单元测试。
+**Q2：为什么 `Renderer` 放在 `model` 包，而不是 `ui` 包？**
+A：`Renderer` 不依赖任何 Swing 组件（只用 `java.awt.Graphics2D`），且**屏幕绘制和 PNG 导出共用同一份**。如果放 `ui`，会让 `util.FileHandler` 反向依赖 `ui`，制造依赖环。
 
-**Q3：Controller 看起来很薄，为什么不直接让 View 改 Model？**
-A：现在看是薄，但 Controller 是**抗变化的关键"腰部"**。一旦要加撤销/重做、权限、日志、脏检查、UI 无关的业务验证，全部都在这里加，View 不动。
+**Q3：为什么 Model 不持有坐标 `(x, y)`？**
+A：坐标是"布局的产物"而非"数据的本质"。同一棵树可用三种布局产生三套坐标。把坐标从 Model 中剥离，才能让 `MindNode` 纯净、可序列化、零 Swing 依赖。
 
-**Q4：为什么 `MindMapRenderer` 要设计成无状态？**
-A：① 可独立单测（给一个 `LayoutResult` 就能验证绘制）；② 可被复用（同一个 Renderer 即画屏幕又导出 PNG/SVG）；③ 线程安全隐患小。
+**Q4：`mutate(Runnable)` 是什么模式？**
+A：可以理解为**模板方法 + 钩子函数**。固定流程是"改模型 → 标记 dirty → 通知"，可变部分（具体怎么改）通过 `Runnable` 注入。它把 6 处样板压成一行，是本项目精简的关键。
 
 **Q5：Swing 在 2026 年还值得学吗？**
-A：作为学习目的**很值得**——它是少数还在活跃使用的"一切都可见"的 GUI 框架，事件循环、EDT、绘制管线都直白暴露。工程落地推荐 JavaFX / Compose Desktop / Electron，但这是另一个话题。
+A：作为学习目的**很值得**——它是少数还在活跃使用、"一切都可见"的 GUI 框架，事件循环、EDT、绘制管线都直白暴露。生产推荐 JavaFX / Compose Desktop。
 
 ---
 
 ## 7. 延伸阅读
 
-- **Reingold-Tilford Trees**（本项目布局算法的理论根源）
-- **《Design Patterns》GoF** — 第 4 章观察者、第 5 章策略、第 2 章命令
+- **Reingold-Tilford Trees**（本项目布局算法的理论根源，Wikipedia "Tidy Trees"）
 - **Oracle Swing Tutorial** — `Graphics2D`、`AffineTransform`、`KeyBinding`
-- **Effective Java（第 3 版）** — 条款 17 "使可变性最小化" 与本项目 Model 设计呼应
+- **《Effective Java（第 3 版）》** — 条款 17 "使可变性最小化"，与本项目 Model 设计呼应
+- **John Ousterhout《A Philosophy of Software Design》** — 第 4 章 "Modules Should Be Deep" 与本项目精简化思路一致
 
 ---
 
 ## 8. 你已经准备好了吗？
 
-✅ 能在一张白纸上画出 5 个包的依赖关系
-✅ 能背出 4 个 `ChangeType` 及它们各自的响应
-✅ 能解释"为什么 `LayoutEngine` 需要 `FontMetrics` 参数"
+✅ 能在白纸上画出 4 个包的依赖关系
+✅ 能解释 `mutate(...)` 一行代码做了哪三件事
+✅ 能解释"为什么 `Layout.compute` 需要 `FontMetrics` 参数"
 ✅ 能独立完成上面至少 2 个改造练习
 
-做到以上 4 点，可以给自己贴一张 **"MindMap 项目毕业生 🎓"** 的标签了。
+做到以上 4 点，可以给自己贴一张 **"MindMap Mini 项目毕业生 🎓"** 的标签。
