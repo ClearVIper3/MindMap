@@ -71,7 +71,7 @@ public class MainFrame extends JFrame {
 
     private void editText(String title, java.util.function.Consumer<String> action) {
         if (selected == null) return;
-        String t = prompt("Node Text:", title, "New Node");
+        String t = prompt("节点文本：", title, "新节点");
         if (t != null && !t.trim().isEmpty()) mutate(() -> action.accept(t.trim()));
     }
 
@@ -80,23 +80,23 @@ public class MainFrame extends JFrame {
         bar.setBackground(Color.WHITE); bar.setFloatable(false);
         bar.setBorder(new EmptyBorder(10, 10, 10, 10));
 
-        addBtn(bar, "New", e -> newMap());
-        addBtn(bar, "Open", e -> doOpen());
-        addBtn(bar, "Save (.dt)", e -> doSave());
+        addBtn(bar, "新建", e -> newMap());
+        addBtn(bar, "打开", e -> doOpen());
+        addBtn(bar, "保存 (.dt)", e -> doSave());
         bar.add(Box.createHorizontalStrut(10));
-        addBtn(bar, "Export Image", e -> doExport());
+        addBtn(bar, "导出图片", e -> doExport());
         bar.add(Box.createHorizontalStrut(10));
-        addBtn(bar, "+ Child", e -> editText("Add Child", t -> selected.addChild(new MindNode(t))));
-        addBtn(bar, "+ Sibling", e -> {
+        addBtn(bar, "+ 子节点", e -> editText("新增子节点", t -> selected.addChild(new MindNode(t))));
+        addBtn(bar, "+ 兄弟节点", e -> {
             if (selected != null && selected.getParent() != null)
-                editText("Add Sibling", t -> selected.addSiblingAfter(new MindNode(t)));
+                editText("新增兄弟节点", t -> selected.addSiblingAfter(new MindNode(t)));
         });
-        addBtn(bar, "Rename", e -> {
+        addBtn(bar, "重命名", e -> {
             if (selected == null) return;
-            String t = prompt("Rename Node:", "Rename", selected.getText());
+            String t = prompt("重命名节点：", "重命名", selected.getText());
             if (t != null && !t.trim().isEmpty()) mutate(() -> selected.setText(t.trim()));
         });
-        addBtn(bar, "Delete", e -> {
+        addBtn(bar, "删除", e -> {
             if (selected != null && selected != root)
                 mutate(() -> { selected.remove(); selected = root; });
         });
