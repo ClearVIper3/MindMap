@@ -56,9 +56,39 @@ public class MainFrame extends JFrame {
     private void mutate(Runnable r) { r.run(); canvas.layoutDirty = true; fire(); }
 
     private void newMap() {
-        root = new MindNode("Java Core Technology");
-        for (String s : new String[]{"Collections", "Concurrency", "JVM Architecture", "I/O & NIO"})
-            root.addChild(new MindNode(s));
+        root = new MindNode("孙子兵法");
+
+        MindNode ch1 = new MindNode("第一章 始计");
+        ch1.addChild(new MindNode("道"));
+        ch1.addChild(new MindNode("天、地"));
+
+        MindNode ch2 = new MindNode("第二章 作战");
+        ch2.addChild(new MindNode("兵贵胜"));
+        ch2.addChild(new MindNode("粮道与消耗"));
+
+        MindNode ch3 = new MindNode("第三章 谋攻");
+        ch3.addChild(new MindNode("上兵伐谋"));
+        ch3.addChild(new MindNode("全胜之策"));
+
+        MindNode ch4 = new MindNode("第四章 军形");
+        ch4.addChild(new MindNode("不败之形"));
+        ch4.addChild(new MindNode("胜可知"));
+
+        MindNode ch5 = new MindNode("第五章 兵势");
+        ch5.addChild(new MindNode("奇正之变"));
+        ch5.addChild(new MindNode("势如破竹"));
+
+        MindNode ch6 = new MindNode("第六章 虚实");
+        ch6.addChild(new MindNode("以实击虚"));
+        ch6.addChild(new MindNode("避实而击虚"));
+
+        root.addChild(ch1);
+        root.addChild(ch2);
+        root.addChild(ch3);
+        root.addChild(ch4);
+        root.addChild(ch5);
+        root.addChild(ch6);
+
         selected = root;
         fileName = "Untitled.dt";
         canvas.layoutDirty = true;
