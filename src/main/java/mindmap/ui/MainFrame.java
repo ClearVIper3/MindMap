@@ -21,11 +21,17 @@ import java.util.List;
 import java.util.Map;
 
 public class MainFrame extends JFrame {
+    /** root: 思维导图的根节点（整棵树的入口）; selected: 当前用户选中的节点 */
     private MindNode root, selected;
+    /** layoutType: 当前布局模式名称; fileName: 当前文件名（用于标题栏和保存） */
     private String layoutType = Layout.DEFAULT, fileName = "Untitled.dt";
+    /** listeners: 观察者模式——模型变更时需要通知的回调列表（画布重绘、树同步、状态栏更新等） */
     private final List<Runnable> listeners = new ArrayList<>();
+    /** canvas: 思维导图的可视化绘制面板（支持缩放、平移、点击选中） */
     private final DrawPanel canvas = new DrawPanel();
+    /** treePanel: 右侧JTree大纲面板，与画布双向同步选中状态 */
     private final TreePanel treePanel = new TreePanel();
+    /** status: 底部状态栏标签，显示文件名、布局模式等信息 */
     private final JLabel status = new JLabel();
 
     public MainFrame() {
@@ -194,9 +200,14 @@ public class MainFrame extends JFrame {
 
     // ============================================================
     private class DrawPanel extends JPanel {
+        /** scale: 当前缩放倍率（鼠标滚轮控制，范围0.2~5.0） */
+        /** tx, ty: 画布平移偏移量（像素），拖拽时累加，用于实现画布平移 */
         double scale = 1.0, tx = 0, ty = 0;
+        /** lastPt: 上一次鼠标按下/拖拽的屏幕坐标，用于计算拖拽增量 */
         Point lastPt;
+        /** layoutDirty: 脏标记——为true时下次paintComponent会重新计算布局，避免每帧都重算 */
         boolean layoutDirty = true;
+        /** ly: 布局计算结果缓存，节点→屏幕矩形的映射（世界坐标系） */
         Map<MindNode, Rectangle> ly;
 
         DrawPanel() {
@@ -220,10 +231,12 @@ public class MainFrame extends JFrame {
                     lastPt = e.getPoint(); repaint();
                 }
             });
+            // 鼠标滚轮缩放：以鼠标指针为中心进行缩放（保持指针下的内容不动）
             addMouseWheelListener(e -> {
-                double os = scale;
+                double os = scale; // os: 缩放前的旧比例
                 scale = Math.max(0.2, Math.min(5.0, e.getWheelRotation() < 0 ? scale * 1.1 : scale / 1.1));
-                double k = scale / os;
+                double k = scale / os; // k: 新旧比例的比值
+                // 关键公式：调整平移量使缩放中心固定在鼠标位置（仿射变换不动点公式）
                 tx = e.getX() - k * (e.getX() - tx);
                 ty = e.getY() - k * (e.getY() - ty);
                 repaint();
@@ -272,7 +285,9 @@ public class MainFrame extends JFrame {
     // ============================================================
     private class TreePanel extends JPanel {
         final JTree tree = new JTree();
+        /** map: MindNode→JTree节点的映射（IdentityHashMap按引用比较，避免equals/hashCode干扰） */
         Map<MindNode, DefaultMutableTreeNode> map = new IdentityHashMap<>();
+        /** syncing: 同步锁标志——为true时忽略JTree的选中事件，防止程序化更新树时触发死循环回调 */
         boolean syncing = false;
 
         TreePanel() {

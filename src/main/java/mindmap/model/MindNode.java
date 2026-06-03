@@ -5,9 +5,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class MindNode implements Serializable {
+    /** 序列化版本号，保证反序列化兼容性；若类结构变更需递增此值 */
     private static final long serialVersionUID = 1L;
+    /** 节点显示文本 */
     private String text;
+    /** 父节点引用（transient 语义：序列化时不保存，反序列化后由 restoreParents() 重建） */
     private MindNode parent;
+    /** 子节点列表，维护树形结构的核心数据；final保证引用不变，内容可增删 */
     private final List<MindNode> children = new ArrayList<>();
 
     public MindNode(String text) { this.text = text; }

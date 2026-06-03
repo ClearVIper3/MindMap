@@ -31,12 +31,14 @@ public class FileHandler {
     }
 
     public static void exportImage(MindNode root, String layoutType, File f) throws Exception {
+        // probe: 1x1像素的临时图片，仅用于获取FontMetrics（因为布局计算需要字体度量信息，但此时还没有真正的画布）
         BufferedImage probe = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
         Graphics2D pg = probe.createGraphics();
         pg.setFont(pg.getFont().deriveFont(Font.BOLD, 14f));
         Map<MindNode, Rectangle> ly = Layout.compute(root, pg.getFontMetrics(), layoutType);
         pg.dispose();
 
+        // b: 整棵树的包围盒; m: 导出图片四周的留白边距（像素）
         Rectangle b = Layout.bounds(root, ly);
         int m = 50;
         BufferedImage img = new BufferedImage(b.width + m * 2, b.height + m * 2, BufferedImage.TYPE_INT_RGB);
